@@ -141,7 +141,7 @@ def convert_data(params, entity_dict, entity_map, mode):
             example["context_left"] = " ".join(mention_context_left)
             example["context_right"] = " ".join(mention_context_right)
             example["mention"] = mention
-            example["label"] = ent_text
+            example["label"] = [ent_text]
             example["label_id"] = k
             example["label_title"] = ent_title
             example["world"] = src

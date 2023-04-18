@@ -257,10 +257,9 @@ def load_CD2CR(split_file):
                     coref_chain.replace("(", "").replace(")", ""),
                     "N/A",
                 )
-                mention_start_sent.add_gold_mention(mention, True)
+                mention_start_sent.add_gold_mention(mention, False)
                 in_mention = False
                 mention_start_sent = None
-
     return docs
 
 

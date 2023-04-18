@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 import json
@@ -5,6 +6,8 @@ import argparse
 import traceback
 import _pickle as cPickle
 import logging
+
+from itertools import groupby
 
 
 sys.path.append(".")
@@ -403,7 +406,6 @@ def generate_records_for_sent(sentence_id, sentences, events, window=5):
 
 def format_data(data_set, events=False):
     processed_dataset = []
-    label_sets = {}
     docs = [
         document
         for topic in data_set.topics.values()
@@ -414,7 +416,12 @@ def format_data(data_set, events=False):
         for sentence_id in sentences:
             sentence_records = generate_records_for_sent(sentence_id, sentences, events)
             processed_dataset.extend(sentence_records)
-    return processed_dataset
+    get_label = lambda x: x["label_id"]
+    label_sets = groupby(
+        sorted(copy.deepcopy(processed_dataset), key=get_label), key=get_label
+    )
+    label_sets = {x: list(y) for x, y in label_sets}
+    return processed_dataset, label_sets
 
 
 def load_data(config_dict):
@@ -527,25 +534,28 @@ def main(args):
 
     write_dataset_statistics("train", train_set, check_predicted=False)
 
-    write_dataset_statistics("dev", dev_set, check_predicted=False)
+    write_dataset_statistics("valid", dev_set, check_predicted=False)
 
     check_predicted = True if config_dict["load_predicted_mentions"] else False
     write_dataset_statistics("test", test_set, check_predicted=check_predicted)
 
     logger.info("Storing processed data...")
     with open(os.path.join(args.output_path, "train.jsonl"), "w") as f:
-        t = format_data(train_set)
+        t, clusters = format_data(train_set)
         for entry in t:
+            entry["label"] = clusters[entry["label_id"]]
             json.dump(entry, f)
             f.write("\n")
-    with open(os.path.join(args.output_path, "dev.jsonl"), "w") as f:
-        t = format_data(dev_set)
+    with open(os.path.join(args.output_path, "valid.jsonl"), "w") as f:
+        t, clusters = format_data(dev_set)
         for entry in t:
+            entry["label"] = clusters[entry["label_id"]]
             json.dump(entry, f)
             f.write("\n")
     with open(os.path.join(args.output_path, "test.jsonl"), "w") as f:
-        t = format_data(test_set)
+        t, clusters = format_data(test_set)
         for entry in t:
+            entry["label"] = clusters[entry["label_id"]]
             json.dump(entry, f)
             f.write("\n")
 
