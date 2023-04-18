@@ -1,4 +1,10 @@
 # -*- mode: gitignore; -*-
+# Project Specific
+blink_data/data/*
+coref_data/cd2cr/*
+coref_data/ecb/*
+
+# General
 *~
 \#*\#
 /.emacs.desktop

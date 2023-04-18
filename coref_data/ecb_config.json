@@ -1,0 +1,21 @@
+{
+    "corpus":"ECB",
+    
+    "train_text_file":"ecb/interim/ECB_Train_corpus.txt",
+    "dev_text_file":"ecb/interim/ECB_Dev_corpus.txt",
+    "test_text_file":"ecb/interim/ECB_Test_corpus.txt",
+
+    "train_event_mentions":"ecb/interim/ECB_Train_Event_gold_mentions.json",
+    "dev_event_mentions":"ecb/interim/ECB_Dev_Event_gold_mentions.json",
+    "test_event_mentions":"ecb/interim/ECB_Test_Event_gold_mentions.json",
+
+    "train_entity_mentions":"ecb/interim/ECB_Train_Entity_gold_mentions.json",
+    "dev_entity_mentions":"ecb/interim/ECB_Dev_Entity_gold_mentions.json",
+    "test_entity_mentions":"ecb/interim/ECB_Test_Entity_gold_mentions.json",
+
+    "cd2cr_train" : "cd2cr/interim/train.conll",
+    "cd2cr_dev" : "cd2cr/interim/dev.conll",
+    "cd2cr_test" : "cd2cr/interim/test.conll",
+
+    "load_predicted_mentions": ""
+}
