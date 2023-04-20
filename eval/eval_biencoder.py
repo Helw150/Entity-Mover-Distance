@@ -42,7 +42,7 @@ def mean_average_precision(rs):
 
 @torch.no_grad()
 def create_faiss_db(eval_data, model, tokenizer, use_label=False):
-    hidden = 512
+    hidden = model.context_encoder.config.hidden_size * 2
     collator = DataCollatorForIndex(tokenizer=tokenizer)
     tokenized = eval_data.map(collator, batched=True).with_format(type="torch")
     reps = tokenized.map(
@@ -61,8 +61,9 @@ def create_faiss_db(eval_data, model, tokenizer, use_label=False):
         search_vectors = reference_vectors = np.array(
             [rep["input_rep"].cpu().numpy() for rep in reps]
         ).reshape(-1, hidden)
-    index = faiss.IndexFlatIP(hidden)
+    index = faiss.IndexFlatL2(hidden)
     index.add(reference_vectors)
+    assert index.ntotal == len(eval_data)
     return (
         index,
         search_vectors,

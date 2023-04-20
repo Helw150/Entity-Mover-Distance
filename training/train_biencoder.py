@@ -35,8 +35,8 @@ class NeighborTrainer(transformers.Trainer):
     ):
         self._memory_tracker.start()
         model = self._wrap_model(self.model, training=False)
-        metric, _, _, _ = nn_eval(self.eval_dataset, model, self.tokenizer)
-        metrics = {metric_key_prefix + "_f1": metric}
+        f1, mrr, _, _ = nn_eval(self.eval_dataset, model, self.tokenizer)
+        metrics = {metric_key_prefix + "_f1": f1, metric_key_prefix + "_mrr": mrr}
         self.log(metrics)
         self.control = self.callback_handler.on_evaluate(
             self.args, self.state, self.control, metrics
@@ -91,6 +91,7 @@ class ModelArguments:
 class TrainingArguments(transformers.TrainingArguments):
     cache_dir: Optional[str] = field(default=None)
     dataset: str = field(default="ECB")
+    dist: str = field(default="l2")
 
 
 def pretrain():
@@ -109,7 +110,11 @@ def pretrain():
     start_token = tokenizer("[START_ENT]").input_ids[1]
     end_token = tokenizer("[END_ENT]").input_ids[1]
     model = BiEncoder(
-        model_call, start_token, end_token, is_coref=training_args.is_coref
+        model_call,
+        start_token,
+        end_token,
+        is_coref=training_args.is_coref,
+        dist=training_args.dist,
     )
     model.context_encoder.resize_token_embeddings(len(tokenizer))
     if not training_args.is_coref:
