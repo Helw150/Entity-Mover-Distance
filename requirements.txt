@@ -1,3 +1,5 @@
 ftfy
 torch==1.12.1
 transformers[torch]
+datasets
+faiss-cpu
