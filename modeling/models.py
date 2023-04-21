@@ -77,7 +77,16 @@ class BiEncoder(torch.nn.Module):
                 loss="sinkhorn", p=2, blur=0.5, backend="online"
             )
         elif dist == "l2":
-            self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin, p=2)
+            self.triplet_loss = lambda ins, outs, negs, margin: F.triplet_margin_loss(
+                ins,
+                outs,
+                negs,
+                margin=margin,
+                p=2,
+                eps=1e-6,
+                swap=False,
+                reduction="mean",
+            )
 
     def set_index(self, index, labels, tokenizations):
         self.faiss_index = index
@@ -117,15 +126,25 @@ class BiEncoder(torch.nn.Module):
         mention_rep = torch.cat([start_piece_vec, end_piece_vec], dim=2)
         return mention_rep.squeeze(1)
 
-    def compute_loss(self, ins, outs, negs):
+    def get_weight(self, mask):
+        probs = mask / mask.sum(1).reshape(-1, 1)
+        return probs
+
+    def compute_loss(self, ins, outs, negs, in_mask=None, out_mask=None, neg_mask=None):
         if self.dist == "l2":
-            loss = self.triplet_loss(ins, outs, negs)
+            loss = self.triplet_loss(ins, outs, negs, self.margin)
         else:
             loss = (
-                self.earth_mover_loss(ins, outs)
-                - self.earth_mover_loss(ins, negs)
-                + self.margin
-            )
+                F.relu(
+                    self.earth_mover_loss(
+                        self.get_weight(in_mask), ins, self.get_weight(out_mask), outs
+                    )
+                    - self.earth_mover_loss(
+                        self.get_weight(in_mask), ins, self.get_weight(neg_mask), negs
+                    )
+                    + self.margin
+                )
+            ).mean()
 
         return loss
 
@@ -146,10 +165,11 @@ class BiEncoder(torch.nn.Module):
             output_mask = torch.tensor(output_mask)
         start_index = torch.argwhere(input_ids == self.start_token)[:, 1].flatten()
         end_index = torch.argwhere(input_ids == self.end_token)[:, 1].flatten()
+        in_hidden_dim = self.context_encoder(
+            input_ids=input_ids, attention_mask=attention_mask
+        ).last_hidden_state
         embedding_ctxt = self.get_mention_rep(
-            self.context_encoder(
-                input_ids=input_ids, attention_mask=attention_mask
-            ).last_hidden_state,
+            in_hidden_dim,
             input_ids,
         )
 
@@ -163,6 +183,7 @@ class BiEncoder(torch.nn.Module):
                 input_ids=output_ids, attention_mask=output_mask
             ).last_hidden_state
             embedding_cands = out_hidden_dim[:, :2]
+
         if not self.training and no_loss == True:
             return {"input_rep": embedding_ctxt, "output_rep": embedding_cands}
         elif not self.training:
@@ -188,7 +209,17 @@ class BiEncoder(torch.nn.Module):
                     input_ids=hard_neg_tok, attention_mask=hard_neg_mask
                 ).last_hidden_state
                 embedding_neg = hard_neg_hidden_dim[:, :2]
-            loss = self.compute_loss(embedding_ctxt, embedding_cands, embedding_neg)
+            if self.dist == "l2":
+                loss = self.compute_loss(embedding_ctxt, embedding_cands, embedding_neg)
+            else:
+                loss = self.compute_loss(
+                    in_hidden_dim,
+                    out_hidden_dim,
+                    hard_neg_hidden_dim,
+                    in_mask=attention_mask,
+                    out_mask=output_mask,
+                    neg_mask=hard_neg_mask,
+                )
             return {
                 "input_rep": embedding_ctxt,
                 "output_rep": embedding_cands,

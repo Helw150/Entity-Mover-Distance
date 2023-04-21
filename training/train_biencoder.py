@@ -101,6 +101,8 @@ def pretrain():
     model_call = lambda: transformers.AutoModel.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
+        hidden_dropout_prob=0.0,
+        attention_probs_dropout_prob=0.0,
     )
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
