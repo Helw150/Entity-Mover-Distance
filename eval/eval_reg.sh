@@ -7,7 +7,7 @@ echo $CKPT
 DS=$1
 
 python eval_biencoder.py \
-       --model_name_or_path "vespa-engine/colbert-medium" \
+       --model_name_or_path "google/electra-small-discriminator" \
        --cache_dir "/data/.cache" \
        --dataset $DS \
        --load_path $CKPT \

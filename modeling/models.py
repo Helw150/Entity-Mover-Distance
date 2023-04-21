@@ -5,7 +5,12 @@ import torch.nn.functional as F
 import transformers
 import random
 
+import sys
+
+from geomloss import SamplesLoss
 from typing import Dict, List, Optional, Tuple, Any
+
+sys.path.append("../modeling")
 
 
 @dataclass
@@ -54,7 +59,9 @@ class DataCollatorForIndex:
 
 
 class BiEncoder(torch.nn.Module):
-    def __init__(self, model_call, start_token, end_token, is_coref, dist="l2"):
+    def __init__(
+        self, model_call, start_token, end_token, is_coref, dist="l2", margin=10
+    ):
         super(BiEncoder, self).__init__()
         self.context_encoder = model_call()
         if not is_coref:
@@ -64,7 +71,13 @@ class BiEncoder(torch.nn.Module):
         self.end_token = end_token
         self.is_coref = is_coref
         self.dist = dist
-        self.triplet_loss = torch.nn.TripletMarginLoss(margin=1.0, p=2)
+        self.margin = margin
+        if dist == "ot":
+            self.earth_mover_loss = SamplesLoss(
+                loss="sinkhorn", p=2, blur=0.5, backend="online"
+            )
+        elif dist == "l2":
+            self.triplet_loss = torch.nn.TripletMarginLoss(margin=margin, p=2)
 
     def set_index(self, index, labels, tokenizations):
         self.faiss_index = index
@@ -108,9 +121,12 @@ class BiEncoder(torch.nn.Module):
         if self.dist == "l2":
             loss = self.triplet_loss(ins, outs, negs)
         else:
-            P = 0
-            N = 0
-            loss = torch.mean(P - N)
+            loss = (
+                self.earth_mover_loss(ins, outs)
+                - self.earth_mover_loss(ins, negs)
+                + self.margin
+            )
+
         return loss
 
     def forward(

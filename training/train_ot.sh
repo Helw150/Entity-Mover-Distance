@@ -1,16 +1,16 @@
-export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=memory.free,index --format=csv,nounits,noheader | sort -nr | head -n 3 | awk '{ print $NF }')
+export CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=memory.free,index --format=csv,nounits,noheader | sort -nr | head -n 2 | awk '{ print $NF }')
 export CUDA_VISIBLE_DEVICES=$(echo $CUDA_VISIBLE_DEVICES | tr " " ",")
 
 DS=$1
 
-python -m torch.distributed.launch --nproc_per_node=4 train_biencoder.py \
+python -m torch.distributed.launch --master_port=1234 --nproc_per_node=2 train_biencoder.py \
        --model_name_or_path "google/electra-base-discriminator" \
        --cache_dir "/data/.cache" \
        --dataset $DS \
-       --dist "l2" \
-       --output_dir "/data/wheld3/models/regular_biencoder_$DS" \
+       --dist "ot" \
+       --output_dir "/data/wheld3/models/ot_biencoder_$DS" \
        --num_train_epochs 50 \
-       --per_device_train_batch_size 4 \
+       --per_device_train_batch_size 8 \
        --per_device_eval_batch_size 32 \
        --metric_for_best_model="f1" \
        --load_best_model_at_end=True \

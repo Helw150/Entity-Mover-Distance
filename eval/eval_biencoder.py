@@ -48,6 +48,7 @@ def create_faiss_db(eval_data, model, tokenizer, use_label=False):
     reps = tokenized.map(
         lambda inputs: model.forward(no_loss=True, **inputs),
         batched=True,
+        load_from_cache_file=False,
         batch_size=16,
     )
     if use_label:
