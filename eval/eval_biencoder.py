@@ -44,7 +44,9 @@ def mean_average_precision(rs):
 def create_faiss_db(eval_data, model, tokenizer, use_label=False):
     hidden = model.context_encoder.config.hidden_size * 2
     collator = DataCollatorForIndex(tokenizer=tokenizer)
-    tokenized = eval_data.map(collator, batched=True).with_format(type="torch")
+    tokenized = eval_data.map(
+        collator, load_from_cache_file=False, batched=True
+    ).with_format(type="torch")
     reps = tokenized.map(
         lambda inputs: model.forward(no_loss=True, **inputs),
         batched=True,
@@ -94,7 +96,7 @@ def nn_eval(eval_data, model, tokenizer, k=5, use_label=False):
     tp = 0
     precision = 0
     singletons = 0
-    for match in matches:
+    for search_i, match in enumerate(matches):
         true_label = match[0]
         if type(true_label) == type("") and "Singleton" in true_label:
             singletons += 1
@@ -131,7 +133,6 @@ class TrainingArguments:
 def eval():
     parser = transformers.HfArgumentParser((ModelArguments, TrainingArguments))
     model_args, training_args = parser.parse_args_into_dataclasses()
-    training_args.is_coref = training_args.dataset != "ZESHEL"
     model_call = lambda: transformers.AutoModel.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -145,12 +146,8 @@ def eval():
     num_added_toks = tokenizer.add_tokens(["[START_ENT]", "[END_ENT]"])
     start_token = tokenizer("[START_ENT]").input_ids[1]
     end_token = tokenizer("[END_ENT]").input_ids[1]
-    model = BiEncoder(
-        model_call, start_token, end_token, is_coref=training_args.is_coref
-    )
+    model = BiEncoder(model_call, start_token, end_token)
     model.context_encoder.resize_token_embeddings(len(tokenizer))
-    if not training_args.is_coref:
-        model.cand_encoder.resize_token_embeddings(len(tokenizer))
     model.eval()
     if training_args.load_path:
         ckpt = torch.load(training_args.load_path)

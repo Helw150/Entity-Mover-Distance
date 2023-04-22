@@ -17,7 +17,7 @@ sys.path.append("../modeling")
 class DataCollatorForIndex:
     tokenizer: transformers.PreTrainedTokenizer
 
-    def format_ex(self, example):
+    def format_ex(self, example, mention_name=None):
         if "context_left" in example:
             return (
                 example["context_left"]
@@ -27,13 +27,21 @@ class DataCollatorForIndex:
                 + example["context_right"]
             )
         else:
-            return example
+            return example.replace(
+                mention_name, "[START_ENT] " + mention_name + " [END_ENT]", 1
+            )
 
     def __call__(self, examples: Dict[str, Any], return_tensors="pt") -> Dict[str, Any]:
         examples = [dict(zip(examples, t)) for t in zip(*examples.values())]
         mention_text = [self.format_ex(example) for example in examples]
         reference_text = [
-            self.format_ex(random.choice(example["label"])) for example in examples
+            self.format_ex(
+                random.choice(example["label"]),
+                mention_name=example["label_title"]
+                if "label_title" in example
+                else None,
+            )
+            for example in examples
         ]
 
         inputs = self.tokenizer(
@@ -59,17 +67,12 @@ class DataCollatorForIndex:
 
 
 class BiEncoder(torch.nn.Module):
-    def __init__(
-        self, model_call, start_token, end_token, is_coref, dist="l2", margin=10
-    ):
+    def __init__(self, model_call, start_token, end_token, dist="l2", margin=10):
         super(BiEncoder, self).__init__()
         self.context_encoder = model_call()
-        if not is_coref:
-            self.cand_encoder = model_call()
         self.config = self.context_encoder.config
         self.start_token = start_token
         self.end_token = end_token
-        self.is_coref = is_coref
         self.dist = dist
         self.margin = margin
         if dist == "ot":
@@ -173,16 +176,10 @@ class BiEncoder(torch.nn.Module):
             input_ids,
         )
 
-        if self.is_coref:
-            out_hidden_dim = self.context_encoder(
-                input_ids=output_ids, attention_mask=output_mask
-            ).last_hidden_state
-            embedding_cands = self.get_mention_rep(out_hidden_dim, output_ids)
-        else:
-            out_hidden_dim = self.cand_encoder(
-                input_ids=output_ids, attention_mask=output_mask
-            ).last_hidden_state
-            embedding_cands = out_hidden_dim[:, :2]
+        out_hidden_dim = self.context_encoder(
+            input_ids=output_ids, attention_mask=output_mask
+        ).last_hidden_state
+        embedding_cands = self.get_mention_rep(out_hidden_dim, output_ids)
 
         if not self.training and no_loss == True:
             return {"input_rep": embedding_ctxt, "output_rep": embedding_cands}
@@ -199,16 +196,10 @@ class BiEncoder(torch.nn.Module):
                 hard_neg_mask.to(output_mask.device),
             )
 
-            if self.is_coref:
-                hard_neg_hidden_dim = self.context_encoder(
-                    input_ids=hard_neg_tok, attention_mask=hard_neg_mask
-                ).last_hidden_state
-                embedding_neg = self.get_mention_rep(hard_neg_hidden_dim, hard_neg_tok)
-            else:
-                hard_neg_hidden_dim = self.cand_encoder(
-                    input_ids=hard_neg_tok, attention_mask=hard_neg_mask
-                ).last_hidden_state
-                embedding_neg = hard_neg_hidden_dim[:, :2]
+            hard_neg_hidden_dim = self.context_encoder(
+                input_ids=hard_neg_tok, attention_mask=hard_neg_mask
+            ).last_hidden_state
+            embedding_neg = self.get_mention_rep(hard_neg_hidden_dim, hard_neg_tok)
             if self.dist == "l2":
                 loss = self.compute_loss(embedding_ctxt, embedding_cands, embedding_neg)
             else:

@@ -49,7 +49,7 @@ class NeighborTrainer(transformers.Trainer):
 class DataCollatorForAlignment:
     tokenizer: transformers.PreTrainedTokenizer
 
-    def format_ex(self, example):
+    def format_ex(self, example, mention_name=None):
         if "context_left" in example:
             return (
                 example["context_left"]
@@ -59,18 +59,32 @@ class DataCollatorForAlignment:
                 + example["context_right"]
             )
         else:
-            return example
+            return example.replace(
+                mention_name, "[START_ENT] " + mention_name + " [END_ENT]", 1
+            )
 
     def __call__(
         self, examples: List[Dict[str, Any]], return_tensors="pt"
     ) -> Dict[str, Any]:
         mention_text = [self.format_ex(example) for example in examples]
         reference_text = [
-            self.format_ex(random.choice(example["label"])) for example in examples
+            self.format_ex(
+                random.choice(example["label"]),
+                mention_name=example["label_title"]
+                if "label_title" in example
+                else None,
+            )
+            for example in examples
         ]
 
         inputs = self.tokenizer(mention_text, padding=True, return_tensors="pt")
-        outputs = self.tokenizer(reference_text, padding=True, return_tensors="pt")
+        outputs = self.tokenizer(
+            reference_text,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
         return dict(
             input_ids=inputs.input_ids,
             attention_mask=inputs.attention_mask,
@@ -97,7 +111,6 @@ class TrainingArguments(transformers.TrainingArguments):
 def pretrain():
     parser = transformers.HfArgumentParser((ModelArguments, TrainingArguments))
     model_args, training_args = parser.parse_args_into_dataclasses()
-    training_args.is_coref = training_args.dataset != "ZESHEL"
     model_call = lambda: transformers.AutoModel.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -115,12 +128,9 @@ def pretrain():
         model_call,
         start_token,
         end_token,
-        is_coref=training_args.is_coref,
         dist=training_args.dist,
     )
     model.context_encoder.resize_token_embeddings(len(tokenizer))
-    if not training_args.is_coref:
-        model.cand_encoder.resize_token_embeddings(len(tokenizer))
     if "ECB" in training_args.dataset:
         base_url = "../coref_data/ecb/final/"
     elif "CD2CR" in training_args.dataset:
@@ -135,10 +145,21 @@ def pretrain():
             "validation": base_url + "valid.jsonl",
         },
     )
+    if "ZESHEL" in training_args.dataset and True:
+        train_ds = dataset["train"].filter(
+            lambda example: example["world"] == "american_football"
+            or example["world"] == "world_of_warcraft"
+        )
+        valid_ds = dataset["validation"].filter(
+            lambda example: example["world"] == "coronation_street"
+        )
+    else:
+        train_ds = dataset["train"]
+        valid_ds = dataset["validation"]
 
     data_module = dict(
-        train_dataset=dataset["train"].shuffle(seed=training_args.seed),
-        eval_dataset=dataset["validation"],
+        train_dataset=train_ds.shuffle(seed=training_args.seed),
+        eval_dataset=valid_ds,
         data_collator=DataCollatorForAlignment(tokenizer=tokenizer),
     )
 
