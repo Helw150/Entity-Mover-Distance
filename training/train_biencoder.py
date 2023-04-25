@@ -15,10 +15,13 @@ from eval_biencoder import nn_eval, create_faiss_db
 
 
 class NeighborTrainer(transformers.Trainer):
+    def set_mode(self, use_label):
+        self.use_label = use_label
+
     def _wrap_model(self, model, training=True, dataloader=None):
         model = super(NeighborTrainer, self)._wrap_model(model, training, dataloader)
         self.model.eval()
-        index, _, labels, tokenizations = create_faiss_db(
+        index, _, labels, tokenizations, _ = create_faiss_db(
             self.train_dataset, self.model, self.tokenizer
         )
         self.model.set_index(index, labels, tokenizations)
@@ -35,8 +38,13 @@ class NeighborTrainer(transformers.Trainer):
     ):
         self._memory_tracker.start()
         model = self._wrap_model(self.model, training=False)
-        f1, mrr, _, _ = nn_eval(self.eval_dataset, model, self.tokenizer)
-        metrics = {metric_key_prefix + "_f1": f1, metric_key_prefix + "_mrr": mrr}
+        recall, mrr, _, _ = nn_eval(
+            self.eval_dataset, model, self.tokenizer, k=64, use_label=self.use_label
+        )
+        metrics = {
+            metric_key_prefix + "_recall": recall,
+            metric_key_prefix + "_mrr": mrr,
+        }
         self.log(metrics)
         self.control = self.callback_handler.on_evaluate(
             self.args, self.state, self.control, metrics
@@ -121,6 +129,7 @@ def pretrain():
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
     )
+    torch.manual_seed(training_args.seed)
     num_added_toks = tokenizer.add_tokens(["[START_ENT]", "[END_ENT]"])
     start_token = tokenizer("[START_ENT]").input_ids[1]
     end_token = tokenizer("[END_ENT]").input_ids[1]
@@ -145,7 +154,7 @@ def pretrain():
             "validation": base_url + "valid.jsonl",
         },
     )
-    if "ZESHEL" in training_args.dataset and True:
+    if "ZESHEL" in training_args.dataset and False:
         train_ds = dataset["train"].filter(
             lambda example: example["world"] == "american_football"
             or example["world"] == "world_of_warcraft"
@@ -168,6 +177,7 @@ def pretrain():
     trainer = NeighborTrainer(
         model=model, tokenizer=tokenizer, args=training_args, **data_module
     )
+    trainer.set_mode("ZESHEL" in training_args.dataset)
     trainer.train()
     trainer.evaluate()
     trainer.save_model()

@@ -76,20 +76,18 @@ class BiEncoder(torch.nn.Module):
         self.dist = dist
         self.margin = margin
         if dist == "ot":
-            self.earth_mover_loss = SamplesLoss(
-                loss="sinkhorn", p=2, blur=0.5, backend="online"
-            )
-        elif dist == "l2":
-            self.triplet_loss = lambda ins, outs, negs, margin: F.triplet_margin_loss(
-                ins,
-                outs,
-                negs,
-                margin=margin,
-                p=2,
-                eps=1e-6,
-                swap=False,
-                reduction="mean",
-            )
+            self.earth_mover_loss = SamplesLoss(loss="sinkhorn", p=2)
+
+        self.triplet_loss = lambda ins, outs, negs, margin: F.triplet_margin_loss(
+            ins,
+            outs,
+            negs,
+            margin=margin,
+            p=2,
+            eps=1e-6,
+            swap=False,
+            reduction="mean",
+        )
 
     def set_index(self, index, labels, tokenizations):
         self.faiss_index = index
@@ -112,8 +110,13 @@ class BiEncoder(torch.nn.Module):
         )
 
     def get_mention_rep(self, hidden_dim, ids):
+        batch_len, token_len, hidden_len = hidden_dim.shape
         start_pieces = torch.argwhere(ids == self.start_token)[:, 1].flatten()
         end_pieces = torch.argwhere(ids == self.end_token)[:, 1].flatten()
+        args = torch.arange(token_len).repeat(batch_len, 1).to(start_pieces.device)
+        upper = args >= start_pieces.reshape(-1, 1)
+        lower = args <= end_pieces.reshape(-1, 1)
+        mask = upper.logical_and(lower)
         start_pieces = start_pieces.repeat(1, hidden_dim.shape[-1]).view(
             -1, 1, hidden_dim.shape[-1]
         )
@@ -127,14 +130,14 @@ class BiEncoder(torch.nn.Module):
         )
 
         mention_rep = torch.cat([start_piece_vec, end_piece_vec], dim=2)
-        return mention_rep.squeeze(1)
+        return mention_rep.squeeze(1), mask
 
     def get_weight(self, mask):
         probs = mask / mask.sum(1).reshape(-1, 1)
         return probs
 
     def compute_loss(self, ins, outs, negs, in_mask=None, out_mask=None, neg_mask=None):
-        if self.dist == "l2":
+        if in_mask == None:
             loss = self.triplet_loss(ins, outs, negs, self.margin)
         else:
             loss = (
@@ -159,6 +162,7 @@ class BiEncoder(torch.nn.Module):
         output_mask,
         label_ids=None,
         no_loss=False,
+        return_full=False,
         **kwargs
     ):
         if type(input_ids) == type([]):
@@ -171,18 +175,25 @@ class BiEncoder(torch.nn.Module):
         in_hidden_dim = self.context_encoder(
             input_ids=input_ids, attention_mask=attention_mask
         ).last_hidden_state
-        embedding_ctxt = self.get_mention_rep(
-            in_hidden_dim,
-            input_ids,
-        )
+        embedding_ctxt, ctxt_mask = self.get_mention_rep(in_hidden_dim, input_ids)
 
         out_hidden_dim = self.context_encoder(
             input_ids=output_ids, attention_mask=output_mask
         ).last_hidden_state
-        embedding_cands = self.get_mention_rep(out_hidden_dim, output_ids)
+        embedding_cands, cand_mask = self.get_mention_rep(out_hidden_dim, output_ids)
 
         if not self.training and no_loss == True:
-            return {"input_rep": embedding_ctxt, "output_rep": embedding_cands}
+            if return_full:
+                return {
+                    "input_rep": embedding_ctxt,
+                    "output_rep": embedding_cands,
+                    "input_full": in_hidden_dim,
+                    "in_ot_mask": ctxt_mask,
+                    "output_full": out_hidden_dim,
+                    "out_ot_mask": cand_mask,
+                }
+            else:
+                return {"input_rep": embedding_ctxt, "output_rep": embedding_cands}
         elif not self.training:
             return {
                 "input_rep": embedding_ctxt,
@@ -199,17 +210,20 @@ class BiEncoder(torch.nn.Module):
             hard_neg_hidden_dim = self.context_encoder(
                 input_ids=hard_neg_tok, attention_mask=hard_neg_mask
             ).last_hidden_state
-            embedding_neg = self.get_mention_rep(hard_neg_hidden_dim, hard_neg_tok)
+            embedding_neg, neg_mask = self.get_mention_rep(
+                hard_neg_hidden_dim, hard_neg_tok
+            )
             if self.dist == "l2":
                 loss = self.compute_loss(embedding_ctxt, embedding_cands, embedding_neg)
             else:
-                loss = self.compute_loss(
+                loss = self.compute_loss(embedding_ctxt, embedding_cands, embedding_neg)
+                loss += self.compute_loss(
                     in_hidden_dim,
                     out_hidden_dim,
                     hard_neg_hidden_dim,
-                    in_mask=attention_mask,
-                    out_mask=output_mask,
-                    neg_mask=hard_neg_mask,
+                    in_mask=ctxt_mask,
+                    out_mask=cand_mask,
+                    neg_mask=neg_mask,
                 )
             return {
                 "input_rep": embedding_ctxt,

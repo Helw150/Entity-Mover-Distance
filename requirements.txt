@@ -6,3 +6,4 @@ faiss-cpu
 pykeops
 geomloss
 sentencepiece
+scikit-learn
